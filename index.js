@@ -1,5 +1,9 @@
 require('dotenv').config();
-const { Client, GatewayIntentBits, Events, EmbedBuilder, PermissionFlagsBits } = require('discord.js');
+const {
+  Client, GatewayIntentBits, Events, EmbedBuilder,
+  PermissionFlagsBits, ActionRowBuilder, ButtonBuilder,
+  ButtonStyle, StringSelectMenuBuilder
+} = require('discord.js');
 const fs = require('fs');
 
 const client = new Client({
@@ -17,21 +21,19 @@ const client = new Client({
 
 const CONFIG_FILE = './config.json';
 const WARNS_FILE = './warns.json';
+const LOG_CHANNEL_ID = '1504787311383023626';
 
 function loadConfig() {
   if (!fs.existsSync(CONFIG_FILE)) fs.writeFileSync(CONFIG_FILE, JSON.stringify({}, null, 2));
   return JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
 }
-
 function saveConfig(config) {
   fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2));
 }
-
 function loadWarns() {
   if (!fs.existsSync(WARNS_FILE)) fs.writeFileSync(WARNS_FILE, JSON.stringify({}, null, 2));
   return JSON.parse(fs.readFileSync(WARNS_FILE, 'utf8'));
 }
-
 function saveWarns(warns) {
   fs.writeFileSync(WARNS_FILE, JSON.stringify(warns, null, 2));
 }
@@ -39,7 +41,6 @@ function saveWarns(warns) {
 // ==================== MOTS INTERDITS ====================
 
 const MOTS_INTERDITS = [
-  // Insultes françaises
   'connard', 'connasse', 'putain', 'merde', 'salope', 'enculé', 'enculer',
   'batard', 'bâtard', 'fdp', 'fils de pute', 'pd', 'pédé', 'nique',
   'niquer', 'ta gueule', 'ferme ta gueule', 'casse toi', 'va te faire',
@@ -50,44 +51,29 @@ const MOTS_INTERDITS = [
   'ferme la', 'ta mère', 'nique ta race', 'sale gosse', 'petit con',
   'gros nul', 'raté', 'minable', 'pitoyable',
   'ordure', 'déchet', 'pourriture', 'fumier', 'salopard',
-  'couillon', 'andouille', 'branleur', 'branleuse',
-  'bite', 'couilles',
-  // Menaces françaises
+  'couillon', 'andouille', 'branleur', 'branleuse', 'bite', 'couilles',
   'je vais te tuer', 'je vais te defoncer', 'je vais te niquer',
   'je vais te latter', 'je vais te peter la gueule', 'je vais te casser',
   'tu vas morfler', 'tu vas prendre', 'viens te battre',
   'je te retrouve', 'je sais ou tu habites', 'tu vas regretter',
-  // Insultes anglaises
   'fuck', 'shit', 'bitch', 'asshole', 'bastard', 'cunt', 'dick',
   'pussy', 'motherfucker', 'stfu', 'kys', 'moron', 'dumbass',
   'shut up', 'go to hell', 'go die', 'kill yourself',
   'jackass', 'dipshit', 'douche', 'douchebag', 'scumbag', 'jerk',
   'prick', 'wanker', 'twat', 'tosser', 'dimwit', 'halfwit', 'nitwit',
-  // Menaces anglaises
   'i will kill you', 'i will hurt you', 'i know where you live',
   'you will regret', 'come fight me', 'i will find you',
 ];
 
-// Normalise le texte pour contourner les tentatives d'évitement
 function normaliser(texte) {
   return texte
     .toLowerCase()
-    .replace(/[àáâãäå]/g, 'a')
-    .replace(/[èéêë]/g, 'e')
-    .replace(/[ìíîï]/g, 'i')
-    .replace(/[òóôõö]/g, 'o')
-    .replace(/[ùúûü]/g, 'u')
-    .replace(/[ç]/g, 'c')
-    .replace(/[ñ]/g, 'n')
-    .replace(/0/g, 'o')
-    .replace(/1/g, 'i')
-    .replace(/3/g, 'e')
-    .replace(/4/g, 'a')
-    .replace(/5/g, 's')
-    .replace(/\$/g, 's')
-    .replace(/@/g, 'a')
-    .replace(/[^a-z\s]/g, '')
-    .replace(/(.)\1+/g, '$1');
+    .replace(/[àáâãäå]/g, 'a').replace(/[èéêë]/g, 'e')
+    .replace(/[ìíîï]/g, 'i').replace(/[òóôõö]/g, 'o')
+    .replace(/[ùúûü]/g, 'u').replace(/[ç]/g, 'c').replace(/[ñ]/g, 'n')
+    .replace(/0/g, 'o').replace(/1/g, 'i').replace(/3/g, 'e')
+    .replace(/4/g, 'a').replace(/5/g, 's').replace(/\$/g, 's')
+    .replace(/@/g, 'a').replace(/[^a-z\s]/g, '').replace(/(.)\1+/g, '$1');
 }
 
 // ==================== ANTI-SPAM ====================
@@ -95,6 +81,54 @@ function normaliser(texte) {
 const spamMap = new Map();
 const SPAM_LIMITE = 5;
 const SPAM_INTERVALLE = 3000;
+
+// ==================== DASHBOARD ====================
+
+function buildDashboardEmbed(guild) {
+  const warns = loadWarns();
+  const guildWarns = warns[guild.id] || {};
+
+  const membres = Object.entries(guildWarns)
+    .filter(([, nb]) => nb > 0)
+    .sort(([, a], [, b]) => b - a);
+
+  const barres = ['🟢', '🟡', '🟠', '🔴'];
+
+  const description = membres.length === 0
+    ? '*Aucun avertissement enregistré* ✅'
+    : membres.map(([userId, nb]) => {
+        const barre = barres[Math.min(nb - 1, 3)];
+        return `${barre} <@${userId}> — **${nb}/4** avertissement(s)`;
+      }).join('\n');
+
+  return new EmbedBuilder()
+    .setTitle('🛡️ Dashboard de Modération')
+    .setDescription(description)
+    .setColor(0x5865F2)
+    .setFooter({ text: `${membres.length} membre(s) sanctionné(s) • Utilisez les boutons pour gérer` })
+    .setTimestamp();
+}
+
+function buildDashboardButtons() {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId('dash_addwarn')
+      .setLabel('➕ Ajouter warn')
+      .setStyle(ButtonStyle.Danger),
+    new ButtonBuilder()
+      .setCustomId('dash_removewarn')
+      .setLabel('➖ Retirer warn')
+      .setStyle(ButtonStyle.Primary),
+    new ButtonBuilder()
+      .setCustomId('dash_resetwarn')
+      .setLabel('🔄 Reset warns')
+      .setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder()
+      .setCustomId('dash_refresh')
+      .setLabel('🔁 Actualiser')
+      .setStyle(ButtonStyle.Success),
+  );
+}
 
 // ==================== SANCTIONS ====================
 
@@ -111,29 +145,44 @@ async function sanctionner(member, raison) {
   saveWarns(warns);
 
   const tag = member.user.tag;
+  const sanctions = ['', '⚠️ Avertissement', '🔇 Mute 10 minutes', '🔇 Mute 24 heures', '🔨 Ban définitif'];
+  const sanction = sanctions[Math.min(nbWarns, 4)];
+
+  try {
+    const logChannel = await member.guild.channels.fetch(LOG_CHANNEL_ID);
+    if (logChannel) {
+      const logEmbed = new EmbedBuilder()
+        .setTitle('📋 Nouvel avertissement')
+        .addFields(
+          { name: 'Joueur', value: `${member.user} (${tag})`, inline: true },
+          { name: 'Avertissement', value: `${nbWarns}/4`, inline: true },
+          { name: 'Sanction', value: sanction, inline: true },
+          { name: 'Raison', value: raison },
+        )
+        .setColor(nbWarns === 1 ? 0xFFA500 : nbWarns === 2 ? 0xFF6600 : nbWarns === 3 ? 0xFF3300 : 0xFF0000)
+        .setTimestamp();
+      await logChannel.send({ embeds: [logEmbed] });
+    }
+  } catch (err) {
+    console.error('Erreur log:', err.message);
+  }
 
   try {
     if (nbWarns === 1) {
-      await member.send(`⚠️ **Avertissement (1/4)** sur **${member.guild.name}**\nRaison : ${raison}\n\nProchain avertissement : mute 10 minutes.`);
-      console.log(`⚠️ Avertissement 1 envoyé à ${tag}`);
-
+      await member.send(`⚠️ **Avertissement (1/4)** sur **${member.guild.name}**\nRaison : ${raison}\n\nProchain : mute 10 minutes.`);
     } else if (nbWarns === 2) {
       await member.timeout(10 * 60 * 1000, raison);
-      await member.send(`🔇 **Mute 10 minutes (2/4)** sur **${member.guild.name}**\nRaison : ${raison}\n\nProchain avertissement : mute 24 heures.`);
-      console.log(`🔇 Mute 10min appliqué à ${tag}`);
-
+      await member.send(`🔇 **Mute 10 minutes (2/4)** sur **${member.guild.name}**\nRaison : ${raison}\n\nProchain : mute 24 heures.`);
     } else if (nbWarns === 3) {
       await member.timeout(24 * 60 * 60 * 1000, raison);
-      await member.send(`🔇 **Mute 24 heures (3/4)** sur **${member.guild.name}**\nRaison : ${raison}\n\nProchain avertissement : ban définitif.`);
-      console.log(`🔇 Mute 24h appliqué à ${tag}`);
-
+      await member.send(`🔇 **Mute 24 heures (3/4)** sur **${member.guild.name}**\nRaison : ${raison}\n\nProchain : ban définitif.`);
     } else if (nbWarns >= 4) {
       await member.send(`🔨 **Ban définitif (4/4)** sur **${member.guild.name}**\nRaison : ${raison}`);
       await member.ban({ reason: raison });
-      console.log(`🔨 Ban appliqué à ${tag}`);
     }
+    console.log(`Sanction ${nbWarns}/4 appliquée à ${tag}`);
   } catch (err) {
-    console.error(`Erreur sanction sur ${tag}:`, err.message);
+    console.error(`Erreur sanction:`, err.message);
   }
 }
 
@@ -141,6 +190,119 @@ async function sanctionner(member, raison) {
 
 client.once(Events.ClientReady, () => {
   console.log(`✅ Bot connecté en tant que ${client.user.tag}`);
+});
+
+// ==================== INTERACTIONS (boutons) ====================
+
+client.on(Events.InteractionCreate, async (interaction) => {
+  if (!interaction.isButton()) return;
+  if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
+    return interaction.reply({ content: '❌ Tu n\'as pas la permission.', ephemeral: true });
+  }
+
+  const guild = interaction.guild;
+
+  if (interaction.customId === 'dash_refresh') {
+    await interaction.update({
+      embeds: [buildDashboardEmbed(guild)],
+      components: [buildDashboardButtons()],
+    });
+  }
+
+  if (interaction.customId === 'dash_addwarn') {
+    const members = await guild.members.fetch();
+    const options = members
+      .filter(m => !m.user.bot)
+      .first(25)
+      .map(m => ({ label: m.user.tag, value: m.user.id }));
+
+    const menu = new ActionRowBuilder().addComponents(
+      new StringSelectMenuBuilder()
+        .setCustomId('select_addwarn')
+        .setPlaceholder('Choisir un membre...')
+        .addOptions(options)
+    );
+    await interaction.reply({ content: '➕ Quel membre ?', components: [menu], ephemeral: true });
+  }
+
+  if (interaction.customId === 'dash_removewarn') {
+    const warns = loadWarns();
+    const guildWarns = warns[guild.id] || {};
+    const sanctionnes = Object.entries(guildWarns).filter(([, nb]) => nb > 0);
+
+    if (sanctionnes.length === 0) {
+      return interaction.reply({ content: '✅ Personne n\'a de warns !', ephemeral: true });
+    }
+
+    const options = await Promise.all(sanctionnes.slice(0, 25).map(async ([userId, nb]) => {
+      const user = await client.users.fetch(userId).catch(() => null);
+      return { label: user ? `${user.tag} (${nb} warn(s))` : userId, value: userId };
+    }));
+
+    const menu = new ActionRowBuilder().addComponents(
+      new StringSelectMenuBuilder()
+        .setCustomId('select_removewarn')
+        .setPlaceholder('Choisir un membre...')
+        .addOptions(options)
+    );
+    await interaction.reply({ content: '➖ Quel membre ?', components: [menu], ephemeral: true });
+  }
+
+  if (interaction.customId === 'dash_resetwarn') {
+    const warns = loadWarns();
+    const guildWarns = warns[guild.id] || {};
+    const sanctionnes = Object.entries(guildWarns).filter(([, nb]) => nb > 0);
+
+    if (sanctionnes.length === 0) {
+      return interaction.reply({ content: '✅ Personne n\'a de warns !', ephemeral: true });
+    }
+
+    const options = await Promise.all(sanctionnes.slice(0, 25).map(async ([userId, nb]) => {
+      const user = await client.users.fetch(userId).catch(() => null);
+      return { label: user ? `${user.tag} (${nb} warn(s))` : userId, value: userId };
+    }));
+
+    const menu = new ActionRowBuilder().addComponents(
+      new StringSelectMenuBuilder()
+        .setCustomId('select_resetwarn')
+        .setPlaceholder('Choisir un membre...')
+        .addOptions(options)
+    );
+    await interaction.reply({ content: '🔄 Quel membre reset ?', components: [menu], ephemeral: true });
+  }
+});
+
+// ==================== INTERACTIONS (menus) ====================
+
+client.on(Events.InteractionCreate, async (interaction) => {
+  if (!interaction.isStringSelectMenu()) return;
+  if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) return;
+
+  const guild = interaction.guild;
+  const userId = interaction.values[0];
+  const warns = loadWarns();
+  if (!warns[guild.id]) warns[guild.id] = {};
+  if (!warns[guild.id][userId]) warns[guild.id][userId] = 0;
+
+  if (interaction.customId === 'select_addwarn') {
+    warns[guild.id][userId]++;
+    saveWarns(warns);
+    const member = await guild.members.fetch(userId).catch(() => null);
+    if (member) await sanctionner(member, 'Warn manuel via dashboard');
+    await interaction.update({ content: `✅ Warn ajouté à <@${userId}> (${warns[guild.id][userId]}/4)`, components: [] });
+  }
+
+  if (interaction.customId === 'select_removewarn') {
+    if (warns[guild.id][userId] > 0) warns[guild.id][userId]--;
+    saveWarns(warns);
+    await interaction.update({ content: `✅ Warn retiré à <@${userId}> (${warns[guild.id][userId]}/4)`, components: [] });
+  }
+
+  if (interaction.customId === 'select_resetwarn') {
+    warns[guild.id][userId] = 0;
+    saveWarns(warns);
+    await interaction.update({ content: `✅ Warns de <@${userId}> remis à zéro.`, components: [] });
+  }
 });
 
 // ==================== MESSAGES ====================
@@ -155,7 +317,6 @@ client.on(Events.MessageCreate, async (message) => {
   if (!estAdmin) {
     const contenuNormalise = normaliser(message.content);
 
-    // --- Mots interdits ---
     const motTrouve = MOTS_INTERDITS.find(mot => contenuNormalise.includes(normaliser(mot)));
     if (motTrouve) {
       await message.delete().catch(() => {});
@@ -165,10 +326,8 @@ client.on(Events.MessageCreate, async (message) => {
       return;
     }
 
-    // --- Anti-spam ---
     const userId = message.author.id;
     const maintenant = Date.now();
-
     if (!spamMap.has(userId)) {
       spamMap.set(userId, { count: 1, debut: maintenant });
     } else {
@@ -189,14 +348,21 @@ client.on(Events.MessageCreate, async (message) => {
     }
   }
 
-  // ==================== COMMANDES ADMIN ====================
-
   if (!estAdmin) return;
+
+  // --- !dashboard ---
+  if (message.content === '!dashboard') {
+    await message.delete().catch(() => {});
+    await message.channel.send({
+      embeds: [buildDashboardEmbed(message.guild)],
+      components: [buildDashboardButtons()],
+    });
+  }
 
   // --- !setup-roles ---
   if (message.content.startsWith('!setup-roles')) {
     const channel = message.mentions.channels.first();
-    if (!channel) return message.reply('❌ Mentionne un canal ! Ex: `!setup-roles #roles "Titre" 🎮=RoleGaming`');
+    if (!channel) return message.reply('❌ Mentionne un canal !');
 
     const titreMatch = message.content.match(/"([^"]+)"/);
     if (!titreMatch) return message.reply('❌ Mets le titre entre guillemets !');
@@ -237,8 +403,7 @@ client.on(Events.MessageCreate, async (message) => {
   // --- !warns @user ---
   if (message.content.startsWith('!warns')) {
     const user = message.mentions.users.first();
-    if (!user) return message.reply('❌ Mentionne un utilisateur ! Ex: `!warns @user`');
-
+    if (!user) return message.reply('❌ Mentionne un utilisateur !');
     const warns = loadWarns();
     const nb = warns[message.guild.id]?.[user.id] || 0;
     message.reply(`⚠️ **${user.tag}** a **${nb}/4** avertissement(s).`);
@@ -247,8 +412,7 @@ client.on(Events.MessageCreate, async (message) => {
   // --- !resetwarns @user ---
   if (message.content.startsWith('!resetwarns')) {
     const user = message.mentions.users.first();
-    if (!user) return message.reply('❌ Mentionne un utilisateur ! Ex: `!resetwarns @user`');
-
+    if (!user) return message.reply('❌ Mentionne un utilisateur !');
     const warns = loadWarns();
     if (warns[message.guild.id]) warns[message.guild.id][user.id] = 0;
     saveWarns(warns);
@@ -258,8 +422,7 @@ client.on(Events.MessageCreate, async (message) => {
   // --- !warn @user raison ---
   if (message.content.startsWith('!warn')) {
     const user = message.mentions.members.first();
-    if (!user) return message.reply('❌ Mentionne un utilisateur ! Ex: `!warn @user raison`');
-
+    if (!user) return message.reply('❌ Mentionne un utilisateur !');
     const raison = message.content.split(' ').slice(2).join(' ') || 'Aucune raison fournie';
     await sanctionner(user, raison);
     message.reply(`✅ **${user.user.tag}** a été sanctionné. Raison : ${raison}`);
@@ -270,9 +433,7 @@ client.on(Events.MessageCreate, async (message) => {
 
 client.on(Events.MessageReactionAdd, async (reaction, user) => {
   if (user.bot) return;
-  if (reaction.partial) {
-    try { await reaction.fetch(); } catch { return; }
-  }
+  if (reaction.partial) { try { await reaction.fetch(); } catch { return; } }
 
   const config = loadConfig();
   const entry = config[reaction.message.id];
@@ -289,9 +450,7 @@ client.on(Events.MessageReactionAdd, async (reaction, user) => {
 
 client.on(Events.MessageReactionRemove, async (reaction, user) => {
   if (user.bot) return;
-  if (reaction.partial) {
-    try { await reaction.fetch(); } catch { return; }
-  }
+  if (reaction.partial) { try { await reaction.fetch(); } catch { return; } }
 
   const config = loadConfig();
   const entry = config[reaction.message.id];
