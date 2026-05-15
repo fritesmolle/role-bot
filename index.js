@@ -31,7 +31,10 @@ const CLIPS_FILE = './clips.json';
 
 function loadClips() {
   if (!fs.existsSync(CLIPS_FILE)) fs.writeFileSync(CLIPS_FILE, JSON.stringify({ clips: [], voteChannelId: null, votes: {} }, null, 2));
-  return JSON.parse(fs.readFileSync(CLIPS_FILE, 'utf8'));
+  const data = JSON.parse(fs.readFileSync(CLIPS_FILE, 'utf8'));
+  if (!data.clips) data.clips = [];
+  if (!data.votes) data.votes = {};
+  return data;
 }
 function saveClips(data) {
   fs.writeFileSync(CLIPS_FILE, JSON.stringify(data, null, 2));
