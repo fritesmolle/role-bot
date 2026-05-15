@@ -40,18 +40,26 @@ function saveClips(data) {
   fs.writeFileSync(CLIPS_FILE, JSON.stringify(data, null, 2));
 }
 
+const ROLE_ROOT = '1504204227189411972';
+
+function hasRootOrAdmin(member) {
+  return member.permissions.has(PermissionFlagsBits.Administrator) ||
+    member.roles.cache.has(ROLE_ROOT);
+}
+
 function isClip(message) {
+  // Fichiers joints (vidéos, images, gifs)
   if (message.attachments.size > 0) return true;
+  // N'importe quelle URL
   const urlRegex = /(https?:\/\/[^\s]+)/g;
-  const urls = message.content.match(urlRegex);
-  if (!urls) return false;
-  return urls.some(url =>
-    url.includes('youtube.com') || url.includes('youtu.be') ||
-    url.includes('twitch.tv') || url.includes('clips.twitch') ||
-    url.includes('streamable.com') || url.includes('medal.tv') ||
-    url.includes('twitter.com') || url.includes('x.com') ||
-    url.includes('tiktok.com')
-  );
+  return urlRegex.test(message.content);
+}
+
+function getClipDisplay(clip) {
+  // Si c'est une pièce jointe, retourne l'URL directe
+  if (clip.attachmentUrl) return clip.attachmentUrl;
+  // Sinon retourne le contenu (URL externe)
+  return clip.content || '';
 }
 
 function buildVoteButtons(clips) {
@@ -110,10 +118,21 @@ async function lancerVoteClips(guild) {
     const clip = data.clips[i];
     const clipEmbed = new EmbedBuilder()
       .setTitle(`🎬 Clip #${i + 1}`)
-      .setDescription(`Posté par <@${clip.authorId}>\n\n${clip.content}`)
+      .setDescription(`Posté par <@${clip.authorId}>`)
       .setColor(0x2B2D31)
       .setFooter({ text: `Clip ${i + 1} sur ${data.clips.length}` });
-    await voteChannel.send({ embeds: [clipEmbed] });
+
+    // Si c'est une pièce jointe vidéo/image
+    if (clip.attachmentUrl) {
+      const isImage = clip.attachmentUrl.match(/\.(png|jpg|jpeg|gif|webp)$/i);
+      if (isImage) clipEmbed.setImage(clip.attachmentUrl);
+      await voteChannel.send({ embeds: [clipEmbed] });
+      if (!isImage) await voteChannel.send(clip.attachmentUrl); // poste la vidéo directement pour preview
+    } else {
+      // URL externe (YouTube, Twitch, etc.)
+      clipEmbed.setDescription(`Posté par <@${clip.authorId}>\n\n${clip.content}`);
+      await voteChannel.send({ embeds: [clipEmbed] });
+    }
   }
 
   // Poste le message de vote avec les boutons
@@ -446,7 +465,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
   }
 
   if (!interaction.isButton()) return;
-  if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
+  if (!hasRootOrAdmin(interaction.member)) {
     return interaction.reply({ content: '❌ Tu n\'as pas la permission.', ephemeral: true });
   }
 
@@ -526,7 +545,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
 client.on(Events.InteractionCreate, async (interaction) => {
   if (!interaction.isStringSelectMenu()) return;
-  if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) return;
+  if (!hasRootOrAdmin(interaction.member)) return;
 
   const guild = interaction.guild;
   const userId = interaction.values[0];
@@ -562,15 +581,19 @@ client.on(Events.MessageCreate, async (message) => {
   if (!message.guild) return;
 
   const member = message.member;
-  const estAdmin = member.permissions.has(PermissionFlagsBits.Administrator);
+  const estAdmin = hasRootOrAdmin(member);
 
   if (!estAdmin) {
     // --- Détection clips ---
     if (message.channel.id === CLIPS_SOURCE_ID && isClip(message)) {
       const data = loadClips();
+      const attachment = message.attachments.first();
       data.clips.push({
         authorId: message.author.id,
-        content: message.content || message.attachments.first()?.url || '',
+        authorTag: message.author.tag,
+        content: message.content || '',
+        attachmentUrl: attachment?.url || null,
+        attachmentName: attachment?.name || null,
         messageId: message.id,
         voteMessageId: null,
       });
