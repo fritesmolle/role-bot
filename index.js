@@ -72,6 +72,8 @@ function buildVoteButtons(clips) {
   return rows;
 }
 
+const CLIPS_ROLE_CLIPEUR = '1504813562776916129';
+
 async function lancerVoteClips(guild) {
   const data = loadClips();
   if (data.clips.length === 0) {
@@ -85,31 +87,45 @@ async function lancerVoteClips(guild) {
     if (ancien) await ancien.delete().catch(() => {});
   }
 
-  // Crée le salon clips-vote
+  // Crée le salon clips-vote en lecture seule pour tout le monde
   const voteChannel = await guild.channels.create({
-    name: 'clips-vote',
+    name: '🎬︱clips-vote',
     type: 0,
     parent: CLIPS_CATEGORIE_ID,
     topic: '🎬 Votez pour votre clip préféré de la semaine ! Le gagnant sera annoncé à 22h.',
+    permissionOverwrites: [
+      {
+        id: guild.roles.everyone.id,
+        deny: ['SendMessages', 'AddReactions', 'CreatePublicThreads', 'CreatePrivateThreads'],
+        allow: ['ViewChannel', 'ReadMessageHistory'],
+      },
+    ],
   });
 
   data.voteChannelId = voteChannel.id;
   data.votes = {};
 
-  // Poste chaque clip
+  // Poste chaque clip avec un embed
   for (let i = 0; i < data.clips.length; i++) {
     const clip = data.clips[i];
-    await voteChannel.send(`**Clip #${i + 1}** — posté par <@${clip.authorId}>\n${clip.content}`);
+    const clipEmbed = new EmbedBuilder()
+      .setTitle(`🎬 Clip #${i + 1}`)
+      .setDescription(`Posté par <@${clip.authorId}>\n\n${clip.content}`)
+      .setColor(0x2B2D31)
+      .setFooter({ text: `Clip ${i + 1} sur ${data.clips.length}` });
+    await voteChannel.send({ embeds: [clipEmbed] });
   }
 
   // Poste le message de vote avec les boutons
   const embed = new EmbedBuilder()
-    .setTitle('🎬 Vote — Clip de la semaine !')
-    .setDescription(`**${data.clips.length} clip(s)** en compétition !\nClique sur le bouton du clip que tu préfères.\n\n⚠️ Tu ne peux voter qu'**une seule fois**.\nLe gagnant sera annoncé à **22h** ce soir !`)
+    .setTitle('🏆 Vote — Clip de la semaine !')
+    .setDescription(`**${data.clips.length} clip(s)** en compétition cette semaine !\n\nClique sur le bouton correspondant au clip que tu préfères.\n\n⚠️ **Tu ne peux voter qu'une seule fois.**\n\n🕐 Le gagnant sera annoncé à **22h** ce soir !`)
     .setColor(0xF1C40F)
-    .setTimestamp();
+    .setTimestamp()
+    .setFooter({ text: 'Bonne chance à tous les participants !' });
 
   const voteMsg = await voteChannel.send({
+    content: `<@&${CLIPS_ROLE_CLIPEUR}> Le vote de la semaine est ouvert !`,
     embeds: [embed],
     components: buildVoteButtons(data.clips),
   });
@@ -161,14 +177,28 @@ async function annoncerGagnantClips(guild) {
     }
   }
 
-  // Annonce le gagnant
+  // Annonce le gagnant avec un beau message
+  const totalVotes = Object.keys(data.votes || {}).length;
   const gagnantEmbed = new EmbedBuilder()
-    .setTitle('🏆 Clip de la semaine !')
-    .setDescription(`Félicitations à <@${meilleurClip.authorId}> avec **${maxVotes} vote(s)** !\n\n${meilleurClip.content}`)
-    .setColor(0xF1C40F)
-    .setTimestamp();
+    .setTitle('🏆 Clip de la semaine — Résultats !')
+    .setDescription(
+      `## 🥇 Félicitations à <@${meilleurClip.authorId}> !\n\n` +
+      `Son clip remporte la semaine avec **${maxVotes} vote(s)** sur ${totalVotes} votant(s) !\n\n` +
+      `**Le clip gagnant :**\n${meilleurClip.content}`
+    )
+    .addFields(
+      { name: '🗳️ Votes reçus', value: `${maxVotes}`, inline: true },
+      { name: '👥 Participants', value: `${totalVotes}`, inline: true },
+      { name: '🎬 Clips en compétition', value: `${data.clips.length}`, inline: true },
+    )
+    .setColor(0xFFD700)
+    .setTimestamp()
+    .setFooter({ text: 'Bravo au gagnant ! Rendez-vous la semaine prochaine 🎬' });
 
-  await voteChannel.send({ embeds: [gagnantEmbed] });
+  await voteChannel.send({
+    content: `<@&${CLIPS_ROLE_CLIPEUR}> 🎉 Les résultats sont là !`,
+    embeds: [gagnantEmbed],
+  });
 
   // Donne le rôle au gagnant
   try {
