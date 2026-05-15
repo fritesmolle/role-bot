@@ -30,7 +30,7 @@ const CLIPS_ROLE_GAGNANT = '1504796213436747826';
 const CLIPS_FILE = './clips.json';
 
 function loadClips() {
-  if (!fs.existsSync(CLIPS_FILE)) fs.writeFileSync(CLIPS_FILE, JSON.stringify({ clips: [], voteChannelId: null }, null, 2));
+  if (!fs.existsSync(CLIPS_FILE)) fs.writeFileSync(CLIPS_FILE, JSON.stringify({ clips: [], voteChannelId: null, votes: {} }, null, 2));
   return JSON.parse(fs.readFileSync(CLIPS_FILE, 'utf8'));
 }
 function saveClips(data) {
@@ -51,11 +51,35 @@ function isClip(message) {
   );
 }
 
+function buildVoteButtons(clips) {
+  // Discord limite à 5 boutons par rangée et 5 rangées max (25 boutons)
+  const rows = [];
+  for (let i = 0; i < Math.min(clips.length, 25); i += 5) {
+    const row = new ActionRowBuilder();
+    for (let j = i; j < Math.min(i + 5, clips.length); j++) {
+      row.addComponents(
+        new ButtonBuilder()
+          .setCustomId(`vote_clip_${j}`)
+          .setLabel(`🎬 Clip #${j + 1}`)
+          .setStyle(ButtonStyle.Primary)
+      );
+    }
+    rows.push(row);
+  }
+  return rows;
+}
+
 async function lancerVoteClips(guild) {
   const data = loadClips();
   if (data.clips.length === 0) {
     console.log('Aucun clip cette semaine, pas de vote.');
     return;
+  }
+
+  // Supprime l'ancien salon si existe
+  if (data.voteChannelId) {
+    const ancien = await guild.channels.fetch(data.voteChannelId).catch(() => null);
+    if (ancien) await ancien.delete().catch(() => {});
   }
 
   // Crée le salon clips-vote
@@ -67,23 +91,27 @@ async function lancerVoteClips(guild) {
   });
 
   data.voteChannelId = voteChannel.id;
+  data.votes = {};
 
-  // Poste chaque clip avec un numéro
+  // Poste chaque clip
+  for (let i = 0; i < data.clips.length; i++) {
+    const clip = data.clips[i];
+    await voteChannel.send(`**Clip #${i + 1}** — posté par <@${clip.authorId}>\n${clip.content}`);
+  }
+
+  // Poste le message de vote avec les boutons
   const embed = new EmbedBuilder()
     .setTitle('🎬 Vote — Clip de la semaine !')
-    .setDescription(`**${data.clips.length} clip(s)** en compétition cette semaine !\nRéagis avec 👍 sur ton clip préféré. Le gagnant sera annoncé à **22h** ce soir !`)
+    .setDescription(`**${data.clips.length} clip(s)** en compétition !\nClique sur le bouton du clip que tu préfères.\n\n⚠️ Tu ne peux voter qu'**une seule fois**.\nLe gagnant sera annoncé à **22h** ce soir !`)
     .setColor(0xF1C40F)
     .setTimestamp();
 
-  await voteChannel.send({ embeds: [embed] });
+  const voteMsg = await voteChannel.send({
+    embeds: [embed],
+    components: buildVoteButtons(data.clips),
+  });
 
-  for (let i = 0; i < data.clips.length; i++) {
-    const clip = data.clips[i];
-    const msg = await voteChannel.send(`**Clip #${i + 1}** — posté par <@${clip.authorId}>\n${clip.content}`);
-    await msg.react('👍');
-    data.clips[i].voteMessageId = msg.id;
-  }
-
+  data.voteMessageId = voteMsg.id;
   saveClips(data);
   console.log(`✅ Salon clips-vote créé avec ${data.clips.length} clips.`);
 }
@@ -95,27 +123,45 @@ async function annoncerGagnantClips(guild) {
   const voteChannel = await guild.channels.fetch(data.voteChannelId).catch(() => null);
   if (!voteChannel) return;
 
-  let meilleurClip = null;
-  let maxVotes = -1;
+  // Compte les votes
+  const comptage = {};
+  for (const [, clipIndex] of Object.entries(data.votes || {})) {
+    comptage[clipIndex] = (comptage[clipIndex] || 0) + 1;
+  }
 
-  for (const clip of data.clips) {
-    if (!clip.voteMessageId) continue;
-    const msg = await voteChannel.messages.fetch(clip.voteMessageId).catch(() => null);
-    if (!msg) continue;
-    const reaction = msg.reactions.cache.get('👍');
-    const votes = reaction ? reaction.count - 1 : 0; // -1 pour enlever le vote du bot
-    if (votes > maxVotes) {
-      maxVotes = votes;
-      meilleurClip = { ...clip, votes };
+  let meilleurIndex = -1;
+  let maxVotes = -1;
+  for (const [index, nb] of Object.entries(comptage)) {
+    if (nb > maxVotes) {
+      maxVotes = nb;
+      meilleurIndex = parseInt(index);
     }
   }
 
-  if (!meilleurClip) return;
+  if (meilleurIndex === -1) {
+    await voteChannel.send('😔 Aucun vote cette semaine, pas de gagnant.');
+    saveClips({ clips: [], voteChannelId: null, votes: {} });
+    return;
+  }
+
+  const meilleurClip = data.clips[meilleurIndex];
+
+  // Désactive les boutons
+  if (data.voteMessageId) {
+    const voteMsg = await voteChannel.messages.fetch(data.voteMessageId).catch(() => null);
+    if (voteMsg) {
+      const disabledRows = buildVoteButtons(data.clips).map(row => {
+        row.components.forEach(btn => btn.setDisabled(true));
+        return row;
+      });
+      await voteMsg.edit({ components: disabledRows }).catch(() => {});
+    }
+  }
 
   // Annonce le gagnant
   const gagnantEmbed = new EmbedBuilder()
     .setTitle('🏆 Clip de la semaine !')
-    .setDescription(`Félicitations à <@${meilleurClip.authorId}> avec **${meilleurClip.votes} vote(s)** !\n\n${meilleurClip.content}`)
+    .setDescription(`Félicitations à <@${meilleurClip.authorId}> avec **${maxVotes} vote(s)** !\n\n${meilleurClip.content}`)
     .setColor(0xF1C40F)
     .setTimestamp();
 
@@ -124,8 +170,6 @@ async function annoncerGagnantClips(guild) {
   // Donne le rôle au gagnant
   try {
     const member = await guild.members.fetch(meilleurClip.authorId);
-
-    // Retire le rôle à l'ancien gagnant
     const role = guild.roles.cache.get(CLIPS_ROLE_GAGNANT);
     if (role) {
       for (const m of role.members.values()) {
@@ -138,8 +182,7 @@ async function annoncerGagnantClips(guild) {
     console.error('Erreur rôle gagnant:', err.message);
   }
 
-  // Remet les clips à zéro pour la semaine suivante
-  saveClips({ clips: [], voteChannelId: data.voteChannelId });
+  saveClips({ clips: [], voteChannelId: null, votes: {} });
 }
 
 function planifierClips(guild) {
@@ -352,6 +395,23 @@ client.once(Events.ClientReady, () => {
 // ==================== INTERACTIONS (boutons) ====================
 
 client.on(Events.InteractionCreate, async (interaction) => {
+  if (interaction.isButton() && interaction.customId.startsWith('vote_clip_')) {
+    const clipIndex = parseInt(interaction.customId.replace('vote_clip_', ''));
+    const data = loadClips();
+
+    if (!data.votes) data.votes = {};
+
+    if (data.votes[interaction.user.id] !== undefined) {
+      return interaction.reply({ content: '❌ Tu as déjà voté !', ephemeral: true });
+    }
+
+    data.votes[interaction.user.id] = clipIndex;
+    saveClips(data);
+
+    const nbVotes = Object.values(data.votes).filter(v => v === clipIndex).length;
+    return interaction.reply({ content: `✅ Tu as voté pour le **Clip #${clipIndex + 1}** ! (${nbVotes} vote(s) pour ce clip)`, ephemeral: true });
+  }
+
   if (!interaction.isButton()) return;
   if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
     return interaction.reply({ content: '❌ Tu n\'as pas la permission.', ephemeral: true });
