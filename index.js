@@ -202,8 +202,7 @@ async function annoncerGagnantClips(guild) {
     .setTitle('🏆 Clip de la semaine — Résultats !')
     .setDescription(
       `## 🥇 Félicitations à <@${meilleurClip.authorId}> !\n\n` +
-      `Son clip remporte la semaine avec **${maxVotes} vote(s)** sur ${totalVotes} votant(s) !\n\n` +
-      `**Le clip gagnant :**\n${meilleurClip.content}`
+      `Son clip remporte la semaine avec **${maxVotes} vote(s)** sur ${totalVotes} votant(s) !`
     )
     .addFields(
       { name: '🗳️ Votes reçus', value: `${maxVotes}`, inline: true },
@@ -218,6 +217,22 @@ async function annoncerGagnantClips(guild) {
     content: `<@&${CLIPS_ROLE_CLIPEUR}> 🎉 Les résultats sont là !`,
     embeds: [gagnantEmbed],
   });
+
+  // Poste le clip gagnant juste en dessous
+  if (meilleurClip.attachmentUrl) {
+    const isImage = meilleurClip.attachmentUrl.match(/\.(png|jpg|jpeg|gif|webp)$/i);
+    if (isImage) {
+      const clipEmbed = new EmbedBuilder()
+        .setDescription(`🏆 **Clip gagnant de <@${meilleurClip.authorId}>**`)
+        .setImage(meilleurClip.attachmentUrl)
+        .setColor(0xFFD700);
+      await voteChannel.send({ embeds: [clipEmbed] });
+    } else {
+      await voteChannel.send(`🏆 **Clip gagnant de <@${meilleurClip.authorId}> :**\n${meilleurClip.attachmentUrl}`);
+    }
+  } else if (meilleurClip.content) {
+    await voteChannel.send(`🏆 **Clip gagnant de <@${meilleurClip.authorId}> :**\n${meilleurClip.content}`);
+  }
 
   // Donne le rôle au gagnant
   try {
@@ -583,24 +598,24 @@ client.on(Events.MessageCreate, async (message) => {
   const member = message.member;
   const estAdmin = hasRootOrAdmin(member);
 
-  if (!estAdmin) {
-    // --- Détection clips ---
-    if (message.channel.id === CLIPS_SOURCE_ID && isClip(message)) {
-      const data = loadClips();
-      const attachment = message.attachments.first();
-      data.clips.push({
-        authorId: message.author.id,
-        authorTag: message.author.tag,
-        content: message.content || '',
-        attachmentUrl: attachment?.url || null,
-        attachmentName: attachment?.name || null,
-        messageId: message.id,
-        voteMessageId: null,
-      });
-      saveClips(data);
-      console.log(`🎬 Clip enregistré de ${message.author.tag}`);
-    }
+  // --- Détection clips (pour tout le monde) ---
+  if (message.channel.id === CLIPS_SOURCE_ID && isClip(message)) {
+    const data = loadClips();
+    const attachment = message.attachments.first();
+    data.clips.push({
+      authorId: message.author.id,
+      authorTag: message.author.tag,
+      content: message.content || '',
+      attachmentUrl: attachment?.url || null,
+      attachmentName: attachment?.name || null,
+      messageId: message.id,
+      voteMessageId: null,
+    });
+    saveClips(data);
+    console.log(`🎬 Clip enregistré de ${message.author.tag}`);
+  }
 
+  if (!estAdmin) {
     const contenuNormalise = normaliser(message.content);
 
     const motTrouve = MOTS_INTERDITS.find(mot => contenuNormalise.includes(normaliser(mot)));
