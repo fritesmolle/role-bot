@@ -55,13 +55,6 @@ function isClip(message) {
   return urlRegex.test(message.content);
 }
 
-function isVideoAttachment(attachment) {
-  if (!attachment) return false;
-  const mime = attachment.contentType || '';
-  if (mime.startsWith('video/')) return true;
-  return !!attachment.name?.match(/\.(mp4|mov|mkv|webm|avi|flv|wmv|m4v)$/i);
-}
-
 function getClipDisplay(clip) {
   // Si c'est une pièce jointe, retourne l'URL directe
   if (clip.attachmentUrl) return clip.attachmentUrl;
@@ -132,17 +125,9 @@ async function lancerVoteClips(guild) {
     // Si c'est une pièce jointe vidéo/image
     if (clip.attachmentUrl) {
       const isImage = clip.attachmentUrl.match(/\.(png|jpg|jpeg|gif|webp)$/i);
-      const isVideo = clip.isVideoAttachment || clip.attachmentUrl.match(/\.(mp4|mov|mkv|webm|avi|flv|wmv|m4v)$/i);
-      if (isImage) {
-        clipEmbed.setImage(clip.attachmentUrl);
-        await voteChannel.send({ embeds: [clipEmbed] });
-      } else if (isVideo) {
-        clipEmbed.setDescription(`Posté par <@${clip.authorId}>\n\n🎥 Fichier vidéo`);
-        await voteChannel.send({ embeds: [clipEmbed], files: [{ attachment: clip.attachmentUrl, name: clip.attachmentName || 'clip.mp4' }] });
-      } else {
-        clipEmbed.setDescription(`Posté par <@${clip.authorId}>\n\n${clip.content}`);
-        await voteChannel.send({ embeds: [clipEmbed], content: clip.attachmentUrl });
-      }
+      if (isImage) clipEmbed.setImage(clip.attachmentUrl);
+      await voteChannel.send({ embeds: [clipEmbed] });
+      if (!isImage) await voteChannel.send(clip.attachmentUrl); // poste la vidéo directement pour preview
     } else {
       // URL externe (YouTube, Twitch, etc.)
       clipEmbed.setDescription(`Posté par <@${clip.authorId}>\n\n${clip.content}`);
@@ -609,8 +594,6 @@ client.on(Events.MessageCreate, async (message) => {
         content: message.content || '',
         attachmentUrl: attachment?.url || null,
         attachmentName: attachment?.name || null,
-        attachmentType: attachment?.contentType || null,
-        isVideoAttachment: isVideoAttachment(attachment),
         messageId: message.id,
         voteMessageId: null,
       });
