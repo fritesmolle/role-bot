@@ -23,6 +23,161 @@ const CONFIG_FILE = './config.json';
 const WARNS_FILE = './warns.json';
 const LOG_CHANNEL_ID = '1504787311383023626';
 
+// ==================== CLIPS ====================
+const CLIPS_SOURCE_ID = '1504795528972603433';
+const CLIPS_CATEGORIE_ID = '1504201346344157326';
+const CLIPS_ROLE_GAGNANT = '1504796213436747826';
+const CLIPS_FILE = './clips.json';
+
+function loadClips() {
+  if (!fs.existsSync(CLIPS_FILE)) fs.writeFileSync(CLIPS_FILE, JSON.stringify({ clips: [], voteChannelId: null }, null, 2));
+  return JSON.parse(fs.readFileSync(CLIPS_FILE, 'utf8'));
+}
+function saveClips(data) {
+  fs.writeFileSync(CLIPS_FILE, JSON.stringify(data, null, 2));
+}
+
+function isClip(message) {
+  if (message.attachments.size > 0) return true;
+  const urlRegex = /(https?:\/\/[^\s]+)/g;
+  const urls = message.content.match(urlRegex);
+  if (!urls) return false;
+  return urls.some(url =>
+    url.includes('youtube.com') || url.includes('youtu.be') ||
+    url.includes('twitch.tv') || url.includes('clips.twitch') ||
+    url.includes('streamable.com') || url.includes('medal.tv') ||
+    url.includes('twitter.com') || url.includes('x.com') ||
+    url.includes('tiktok.com')
+  );
+}
+
+async function lancerVoteClips(guild) {
+  const data = loadClips();
+  if (data.clips.length === 0) {
+    console.log('Aucun clip cette semaine, pas de vote.');
+    return;
+  }
+
+  // Crée le salon clips-vote
+  const voteChannel = await guild.channels.create({
+    name: 'clips-vote',
+    type: 0,
+    parent: CLIPS_CATEGORIE_ID,
+    topic: '🎬 Votez pour votre clip préféré de la semaine ! Le gagnant sera annoncé à 22h.',
+  });
+
+  data.voteChannelId = voteChannel.id;
+
+  // Poste chaque clip avec un numéro
+  const embed = new EmbedBuilder()
+    .setTitle('🎬 Vote — Clip de la semaine !')
+    .setDescription(`**${data.clips.length} clip(s)** en compétition cette semaine !\nRéagis avec 👍 sur ton clip préféré. Le gagnant sera annoncé à **22h** ce soir !`)
+    .setColor(0xF1C40F)
+    .setTimestamp();
+
+  await voteChannel.send({ embeds: [embed] });
+
+  for (let i = 0; i < data.clips.length; i++) {
+    const clip = data.clips[i];
+    const msg = await voteChannel.send(`**Clip #${i + 1}** — posté par <@${clip.authorId}>\n${clip.content}`);
+    await msg.react('👍');
+    data.clips[i].voteMessageId = msg.id;
+  }
+
+  saveClips(data);
+  console.log(`✅ Salon clips-vote créé avec ${data.clips.length} clips.`);
+}
+
+async function annoncerGagnantClips(guild) {
+  const data = loadClips();
+  if (!data.voteChannelId || data.clips.length === 0) return;
+
+  const voteChannel = await guild.channels.fetch(data.voteChannelId).catch(() => null);
+  if (!voteChannel) return;
+
+  let meilleurClip = null;
+  let maxVotes = -1;
+
+  for (const clip of data.clips) {
+    if (!clip.voteMessageId) continue;
+    const msg = await voteChannel.messages.fetch(clip.voteMessageId).catch(() => null);
+    if (!msg) continue;
+    const reaction = msg.reactions.cache.get('👍');
+    const votes = reaction ? reaction.count - 1 : 0; // -1 pour enlever le vote du bot
+    if (votes > maxVotes) {
+      maxVotes = votes;
+      meilleurClip = { ...clip, votes };
+    }
+  }
+
+  if (!meilleurClip) return;
+
+  // Annonce le gagnant
+  const gagnantEmbed = new EmbedBuilder()
+    .setTitle('🏆 Clip de la semaine !')
+    .setDescription(`Félicitations à <@${meilleurClip.authorId}> avec **${meilleurClip.votes} vote(s)** !\n\n${meilleurClip.content}`)
+    .setColor(0xF1C40F)
+    .setTimestamp();
+
+  await voteChannel.send({ embeds: [gagnantEmbed] });
+
+  // Donne le rôle au gagnant
+  try {
+    const member = await guild.members.fetch(meilleurClip.authorId);
+
+    // Retire le rôle à l'ancien gagnant
+    const role = guild.roles.cache.get(CLIPS_ROLE_GAGNANT);
+    if (role) {
+      for (const m of role.members.values()) {
+        await m.roles.remove(CLIPS_ROLE_GAGNANT).catch(() => {});
+      }
+    }
+    await member.roles.add(CLIPS_ROLE_GAGNANT);
+    console.log(`🏆 Rôle Clip King donné à ${member.user.tag}`);
+  } catch (err) {
+    console.error('Erreur rôle gagnant:', err.message);
+  }
+
+  // Remet les clips à zéro pour la semaine suivante
+  saveClips({ clips: [], voteChannelId: data.voteChannelId });
+}
+
+function planifierClips(guild) {
+  const maintenant = new Date();
+
+  // Dimanche = 0
+  const jourSemaine = maintenant.getDay();
+  const heures = maintenant.getHours();
+  const minutes = maintenant.getMinutes();
+
+  // Calcule le prochain dimanche matin 10h
+  const msDansUnJour = 24 * 60 * 60 * 1000;
+  const joursAvantDimanche = (7 - jourSemaine) % 7 || 7;
+  const prochainDimanche = new Date(maintenant);
+  prochainDimanche.setDate(maintenant.getDate() + joursAvantDimanche);
+  prochainDimanche.setHours(10, 0, 0, 0);
+
+  // Calcule le prochain dimanche 22h
+  const prochainDimanche22h = new Date(prochainDimanche);
+  prochainDimanche22h.setHours(22, 0, 0, 0);
+
+  const msAvantVote = prochainDimanche - maintenant;
+  const msAvantAnnonce = prochainDimanche22h - maintenant;
+
+  console.log(`⏰ Prochain vote clips dans ${Math.round(msAvantVote / 1000 / 60)} minutes`);
+  console.log(`⏰ Prochaine annonce clips dans ${Math.round(msAvantAnnonce / 1000 / 60)} minutes`);
+
+  setTimeout(async () => {
+    await lancerVoteClips(guild);
+    setInterval(() => lancerVoteClips(guild), 7 * msDansUnJour);
+  }, msAvantVote);
+
+  setTimeout(async () => {
+    await annoncerGagnantClips(guild);
+    setInterval(() => annoncerGagnantClips(guild), 7 * msDansUnJour);
+  }, msAvantAnnonce);
+}
+
 function loadConfig() {
   if (!fs.existsSync(CONFIG_FILE)) fs.writeFileSync(CONFIG_FILE, JSON.stringify({}, null, 2));
   return JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
@@ -190,6 +345,8 @@ async function sanctionner(member, raison) {
 
 client.once(Events.ClientReady, () => {
   console.log(`✅ Bot connecté en tant que ${client.user.tag}`);
+  const guild = client.guilds.cache.first();
+  if (guild) planifierClips(guild);
 });
 
 // ==================== INTERACTIONS (boutons) ====================
@@ -315,6 +472,19 @@ client.on(Events.MessageCreate, async (message) => {
   const estAdmin = member.permissions.has(PermissionFlagsBits.Administrator);
 
   if (!estAdmin) {
+    // --- Détection clips ---
+    if (message.channel.id === CLIPS_SOURCE_ID && isClip(message)) {
+      const data = loadClips();
+      data.clips.push({
+        authorId: message.author.id,
+        content: message.content || message.attachments.first()?.url || '',
+        messageId: message.id,
+        voteMessageId: null,
+      });
+      saveClips(data);
+      console.log(`🎬 Clip enregistré de ${message.author.tag}`);
+    }
+
     const contenuNormalise = normaliser(message.content);
 
     const motTrouve = MOTS_INTERDITS.find(mot => contenuNormalise.includes(normaliser(mot)));
@@ -357,6 +527,24 @@ client.on(Events.MessageCreate, async (message) => {
       embeds: [buildDashboardEmbed(message.guild)],
       components: [buildDashboardButtons()],
     });
+  }
+
+  // --- !testclips (force le lancement du vote pour tester) ---
+  if (message.content === '!testclips') {
+    await lancerVoteClips(message.guild);
+    message.reply('✅ Vote clips lancé manuellement !');
+  }
+
+  // --- !testgagnant (force l'annonce du gagnant pour tester) ---
+  if (message.content === '!testgagnant') {
+    await annoncerGagnantClips(message.guild);
+    message.reply('✅ Annonce gagnant lancée manuellement !');
+  }
+
+  // --- !clips (voir combien de clips enregistrés) ---
+  if (message.content === '!clips') {
+    const data = loadClips();
+    message.reply(`🎬 **${data.clips.length}** clip(s) enregistré(s) cette semaine.`);
   }
 
   // --- !setup-roles ---
