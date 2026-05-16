@@ -834,8 +834,7 @@ client.on(Events.MessageCreate, async (message) => {
       .setFooter({ text: 'Toutes les commandes sont réservées au rôle Root' });
     message.reply({ embeds: [embed] });
   }
-
-
+});
 
 // ==================== REACTIONS ====================
 
