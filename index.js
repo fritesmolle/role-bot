@@ -738,15 +738,104 @@ client.on(Events.MessageCreate, async (message) => {
     message.reply(`✅ Avertissements de **${user.tag}** remis à zéro.`);
   }
 
-  // --- !warn @user raison ---
-  if (message.content.startsWith('!warn')) {
-    const user = message.mentions.members.first();
-    if (!user) return message.reply('❌ Mentionne un utilisateur !');
-    const raison = message.content.split(' ').slice(2).join(' ') || 'Aucune raison fournie';
-    await sanctionner(user, raison);
-    message.reply(`✅ **${user.user.tag}** a été sanctionné. Raison : ${raison}`);
+  // --- !clear <nombre> ---
+  if (message.content.startsWith('!clear')) {
+    const args = message.content.split(' ');
+    const nombre = parseInt(args[1]);
+    if (isNaN(nombre) || nombre < 1 || nombre > 100) return message.reply('❌ Indique un nombre entre 1 et 100 ! Ex: `!clear 10`');
+    await message.delete().catch(() => {});
+    const deleted = await message.channel.bulkDelete(nombre, true).catch(() => null);
+    const confirm = await message.channel.send(`🗑️ **${deleted?.size || 0}** message(s) supprimé(s).`);
+    setTimeout(() => confirm.delete().catch(() => {}), 4000);
   }
-});
+
+  // --- !kick @user raison ---
+  if (message.content.startsWith('!kick')) {
+    const user = message.mentions.members.first();
+    if (!user) return message.reply('❌ Mentionne un utilisateur ! Ex: `!kick @user raison`');
+    const raison = message.content.split(' ').slice(2).join(' ') || 'Aucune raison fournie';
+    await user.kick(raison).catch(() => {});
+    message.reply(`👢 **${user.user.tag}** a été kick. Raison : ${raison}`);
+  }
+
+  // --- !ban @user raison ---
+  if (message.content.startsWith('!ban') && !message.content.startsWith('!unban')) {
+    const user = message.mentions.members.first();
+    if (!user) return message.reply('❌ Mentionne un utilisateur ! Ex: `!ban @user raison`');
+    const raison = message.content.split(' ').slice(2).join(' ') || 'Aucune raison fournie';
+    await user.ban({ reason: raison }).catch(() => {});
+    message.reply(`🔨 **${user.user.tag}** a été banni. Raison : ${raison}`);
+  }
+
+  // --- !unban <userId> ---
+  if (message.content.startsWith('!unban')) {
+    const userId = message.content.split(' ')[1];
+    if (!userId) return message.reply('❌ Indique un ID ! Ex: `!unban 123456789`');
+    await message.guild.members.unban(userId).catch(() => {});
+    message.reply(`✅ Utilisateur \`${userId}\` débanni.`);
+  }
+
+  // --- !mute @user <durée> (ex: 10m, 1h, 1j) ---
+  if (message.content.startsWith('!mute') && !message.content.startsWith('!unmute')) {
+    const user = message.mentions.members.first();
+    if (!user) return message.reply('❌ Mentionne un utilisateur ! Ex: `!mute @user 10m`');
+    const args = message.content.split(' ');
+    const dureeStr = args[2] || '10m';
+    let ms = 0;
+    if (dureeStr.endsWith('m')) ms = parseInt(dureeStr) * 60 * 1000;
+    else if (dureeStr.endsWith('h')) ms = parseInt(dureeStr) * 60 * 60 * 1000;
+    else if (dureeStr.endsWith('j')) ms = parseInt(dureeStr) * 24 * 60 * 60 * 1000;
+    else return message.reply('❌ Format invalide ! Utilise `10m`, `1h` ou `1j`');
+    if (ms > 28 * 24 * 60 * 60 * 1000) return message.reply('❌ Maximum 28 jours !');
+    await user.timeout(ms, 'Mute manuel').catch(() => {});
+    message.reply(`🔇 **${user.user.tag}** muté pendant **${dureeStr}**.`);
+  }
+
+  // --- !unmute @user ---
+  if (message.content.startsWith('!unmute')) {
+    const user = message.mentions.members.first();
+    if (!user) return message.reply('❌ Mentionne un utilisateur ! Ex: `!unmute @user`');
+    await user.timeout(null).catch(() => {});
+    message.reply(`🔊 **${user.user.tag}** est unmute.`);
+  }
+
+  // --- !slowmode <secondes> ---
+  if (message.content.startsWith('!slowmode')) {
+    const secondes = parseInt(message.content.split(' ')[1]);
+    if (isNaN(secondes) || secondes < 0 || secondes > 21600) return message.reply('❌ Indique un nombre de secondes entre 0 et 21600 ! Ex: `!slowmode 5`');
+    await message.channel.setRateLimitPerUser(secondes).catch(() => {});
+    message.reply(secondes === 0 ? '✅ Slowmode désactivé.' : `⏱️ Slowmode activé : **${secondes}** seconde(s).`);
+  }
+
+  // --- !lock ---
+  if (message.content === '!lock') {
+    await message.channel.permissionOverwrites.edit(message.guild.roles.everyone, { SendMessages: false }).catch(() => {});
+    message.channel.send('🔒 Salon verrouillé.');
+  }
+
+  // --- !unlock ---
+  if (message.content === '!unlock') {
+    await message.channel.permissionOverwrites.edit(message.guild.roles.everyone, { SendMessages: null }).catch(() => {});
+    message.channel.send('🔓 Salon déverrouillé.');
+  }
+
+  // --- !help ---
+  if (message.content === '!help') {
+    const embed = new EmbedBuilder()
+      .setTitle('📋 Commandes disponibles')
+      .setColor(0x5865F2)
+      .addFields(
+        { name: '🛡️ Modération', value: '`!warn @user raison` — Avertir\n`!warns @user` — Voir warns\n`!resetwarns @user` — Reset warns\n`!mute @user 10m/1h/1j` — Mute\n`!unmute @user` — Unmute\n`!kick @user raison` — Kick\n`!ban @user raison` — Ban\n`!unban <id>` — Unban' },
+        { name: '🧹 Salons', value: '`!clear <1-100>` — Supprimer des messages\n`!slowmode <secondes>` — Slowmode\n`!lock` — Verrouiller le salon\n`!unlock` — Déverrouiller le salon' },
+        { name: '🎭 Rôles', value: '`!setup-roles #salon "titre" 🎮=Role` — Créer un message de rôles' },
+        { name: '🎬 Clips', value: '`!clips` — Voir les clips de la semaine\n`!testclips` — Lancer le vote manuellement\n`!testgagnant` — Annoncer le gagnant manuellement' },
+        { name: '📊 Dashboard', value: '`!dashboard` — Ouvrir le dashboard de modération' },
+      )
+      .setFooter({ text: 'Toutes les commandes sont réservées au rôle Root' });
+    message.reply({ embeds: [embed] });
+  }
+
+
 
 // ==================== REACTIONS ====================
 
