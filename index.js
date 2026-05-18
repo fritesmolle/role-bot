@@ -1221,6 +1221,7 @@ client.on(Events.MessageCreate, async (message) => {
     );
 
     return message.reply({ embeds: [embed], components: [row] });
+  }
 
   // ==================== COMMANDES ADMIN ====================
 
